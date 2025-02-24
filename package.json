@@ -1,0 +1,17 @@
+{
+  "name": "gmail_analysis",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node AnalysisBulkDelete.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google-cloud/local-auth": "^3.0.1",
+    "googleapis": "^144.0.0"
+  }
+}
