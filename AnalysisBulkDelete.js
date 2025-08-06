@@ -32,7 +32,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function getGmailClient() {
   console.log('Starting authentication...');
   const auth = await authenticate({
-    keyfilePath: '/Users/kurukshetrant/zypherz_workspace/gmail_analysis/client_secret_779943235799-2k4e8l0lnsf0pehndcci54p8m6bl3vk4.apps.googleusercontent.com.json',
+    keyfilePath: 'client_secret.json',
     scopes: SCOPES,
   });
   console.log('Authentication successful!');
@@ -358,6 +358,150 @@ async function bulkDeleteFromEmailList(emailList, maxMessagesPerSender = null) {
   }
 }
 
+async function bulkArchiveFromSender(gmail, sender) {
+  console.log(`\nArchiving ALL messages from ${sender}...`);
+  let archivedCount = 0;
+  let nextPageToken = null;
+  let failedAttempts = 0;
+  const maxFailedAttempts = 3;
+
+  try {
+    do {
+      try {
+        // Get batch of message IDs
+        const response = await retryWithExponentialBackoff(async () => {
+          return await gmail.users.messages.list({
+            userId: 'me',
+            maxResults: CONFIG.DELETE_BATCH_SIZE,
+            q: `from:${sender} is:unread`,
+            pageToken: nextPageToken,
+            fields: 'messages/id,nextPageToken,resultSizeEstimate'
+          });
+        });
+
+        const messages = response.data.messages || [];
+        if (messages.length === 0) {
+          console.log('No more messages to archive');
+          break;
+        }
+
+        // Log estimated remaining messages
+        if (response.data.resultSizeEstimate) {
+          console.log(`Estimated remaining messages: ${response.data.resultSizeEstimate}`);
+        }
+
+        // Archive the batch
+        for (const message of messages) {
+          await retryWithExponentialBackoff(async () => {
+            await gmail.users.messages.modify({
+              userId: 'me',
+              id: message.id,
+              requestBody: {
+                removeLabelIds: ['INBOX'],
+                addLabelIds: []
+              }
+            });
+          });
+        }
+
+        archivedCount += messages.length;
+        console.log(`Progress: Archived ${archivedCount} messages from ${sender}`);
+
+        // Reset failed attempts on successful operation
+        failedAttempts = 0;
+
+        nextPageToken = response.data.nextPageToken;
+
+        // Add delay between batches to avoid rate limits
+        await sleep(CONFIG.RATE_LIMIT.BASE_DELAY);
+
+      } catch (batchError) {
+        failedAttempts++;
+        console.error(`Batch archiving error (attempt ${failedAttempts}/${maxFailedAttempts}):`, batchError.message);
+
+        if (failedAttempts >= maxFailedAttempts) {
+          throw new Error(`Failed to archive batch after ${maxFailedAttempts} attempts`);
+        }
+
+        // Wait longer after a failed attempt
+        await sleep(CONFIG.RATE_LIMIT.BASE_DELAY * 2);
+      }
+    } while (nextPageToken);
+
+    console.log(`\nCompleted archiving for ${sender}`);
+    console.log(`Total messages archived: ${archivedCount}`);
+    return archivedCount;
+
+  } catch (error) {
+    console.error(`Fatal error archiving emails from ${sender}:`, error);
+    return archivedCount;
+  }
+}
+
+async function bulkArchiveFromEmailList(emailList) {
+  try {
+    console.log('Starting bulk archive process...');
+    const gmail = await getGmailClient();
+
+    let totalArchived = 0;
+    const archiveStats = new Map();
+
+    // Read email list from file if string is provided
+    if (typeof emailList === 'string') {
+      const content = await fs.readFile(emailList, 'utf8');
+      emailList = content.split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('#')); // Skip empty lines and comments
+    }
+
+    console.log(`Processing ${emailList.length} email addresses...`);
+
+    for (const email of emailList) {
+      if (!email) continue;
+
+      console.log(`\nProcessing ${email}...`);
+      const archivedCount = await bulkArchiveFromSender(gmail, email);
+      totalArchived += archivedCount;
+      archiveStats.set(email, archivedCount);
+
+      // Save progress after each email
+      await saveProgressToFile({
+        totalArchived,
+        lastProcessedEmail: email,
+        archiveStats: Object.fromEntries(archiveStats),
+        timestamp: new Date().toISOString()
+      }, 'archive-progress.json');
+
+      // Add delay between senders
+      await sleep(CONFIG.RATE_LIMIT.BASE_DELAY);
+    }
+
+    // Generate archiving report
+    const reportContent = ['email,archivedCount'];
+    archiveStats.forEach((count, email) => {
+      reportContent.push(`"${email}",${count}`);
+    });
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const reportFile = `archiving-report-${timestamp}.csv`;
+    await fs.writeFile(reportFile, reportContent.join('\n'));
+
+    console.log('\nArchiving process complete!');
+    console.log(`Total emails archived: ${totalArchived}`);
+    console.log(`Report saved to: ${reportFile}`);
+
+    return {
+      totalArchived,
+      reportFile,
+      archiveStats
+    };
+
+  } catch (error) {
+    console.error('Error in bulk archive process:', error);
+    throw error;
+  }
+}
+
 async function main() {
   try {
     const args = process.argv.slice(2);
@@ -365,15 +509,27 @@ async function main() {
       // Delete mode
       const emailListFile = args[1];
       const maxMessagesPerSender = args[2] ? parseInt(args[2]) : null;
-      
+
       if (!emailListFile) {
         console.error('Please provide an email list file path.');
-        console.log('Usage: node Analysis90k.js --delete <email-list-file> [max-messages-per-sender]');
+        console.log('Usage: node AnalysisBulkDelete.js --delete <email-list-file> [max-messages-per-sender]');
         return;
       }
 
       console.log('Starting bulk delete operation...');
       await bulkDeleteFromEmailList(emailListFile, maxMessagesPerSender);
+    } else if (args.length > 0 && args[0] === '--archive') {
+      // Archive mode
+      const emailListFile = args[1];
+
+      if (!emailListFile) {
+        console.error('Please provide an email list file path.');
+        console.log('Usage: node AnalysisBulkDelete.js --archive <email-list-file>');
+        return;
+      }
+
+      console.log('Starting bulk archive operation...');
+      await bulkArchiveFromEmailList(emailListFile);
     } else {
       // Analysis mode
       console.log('Starting large-scale email analysis...');

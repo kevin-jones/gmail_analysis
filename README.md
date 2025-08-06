@@ -5,14 +5,18 @@ This Node.js script provides functionality to analyze and bulk delete Gmail mess
 ## Features
 
 - **Email Analysis**: Generate statistics about email senders including:
-  - Total email count per sender
-  - Total size of emails per sender
-  - Last email received date
+    - Total email count per sender
+    - Total size of emails per sender
+    - Last email received date
 - **Bulk Deletion**: Delete emails from specific senders with:
-  - Batch processing to handle large volumes
-  - Progress tracking and checkpointing
-  - Rate limit handling
-  - Detailed deletion reports
+    - Batch processing to handle large volumes
+    - Progress tracking and checkpointing
+    - Rate limit handling
+    - Detailed deletion reports
+- **Bulk Archiving**: Archive emails from specific senders without deleting them:
+    - Retain important emails while decluttering your inbox
+    - Batch processing for efficient archiving
+    - Progress tracking and detailed archiving reports
 
 ## Prerequisites
 
@@ -72,6 +76,21 @@ To delete emails from specific senders:
    node AnalysisBulkDelete.js --delete emails-to-delete.txt
    ```
 
+### 3. Email Archive Mode
+
+To archive emails from specific senders:
+
+1. Create a text file (e.g., `emails-to-archive.txt`) containing email addresses:
+   ```text
+   example1@example.com
+   example2@example.com
+   ```
+
+2. Run the archive command:
+   ```bash
+   node AnalysisBulkDelete.js --archive emails-to-archive.txt
+   ```
+
 ### Output Files
 
 The script generates several files:
@@ -83,6 +102,10 @@ The script generates several files:
    - `delete-progress.json`: Checkpoint file for deletion progress
    - `deletion-report-{timestamp}.csv`: Final deletion report
 
+3. **Archive Mode**:
+   - `archive-progress.json`: Checkpoint file for archive progress
+   - `archive-report-{timestamp}.csv`: Final archive report
+
 ## Configuration
 
 Key configuration options in `CONFIG` object:
@@ -90,7 +113,7 @@ Key configuration options in `CONFIG` object:
 ```javascript
 const CONFIG = {
   BATCH_SIZE: 100,          // Messages per batch for analysis
-  DELETE_BATCH_SIZE: 500,   // Messages per batch for deletion
+  DELETE_BATCH_SIZE: 500,   // Messages per batch for deletion/archiving
   RATE_LIMIT: {
     BASE_DELAY: 2000,       // Base delay between requests (ms)
     MAX_RETRIES: 5,         // Maximum retry attempts
